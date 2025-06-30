@@ -574,7 +574,7 @@ int main()
               unitAmountOnTile++;
           }
 
-          if (city.citytiles.size() > player.units.size())
+          if (city.citytiles.size() > player.units.size() && unitAmountOnTile == 0)
           {
             actions.push_back(citytile.buildWorker());
           }
