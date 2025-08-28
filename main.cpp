@@ -23,16 +23,14 @@ enum UnitState
 
 struct UnitAction
 {
+  string unitID;
   UnitState state;
   Position targetPosition;
   vector<Position> pathToTarget;
   int currentPathIdx;
 
-  UnitAction(Position targetPosition)
+  UnitAction(string ID, Position targetPosition) : unitID(ID), targetPosition(targetPosition), state(DO_NOTHING), currentPathIdx(0)
   {
-    state = DO_NOTHING;
-    currentPathIdx = 0;
-    this->targetPosition = targetPosition;
   }
 };
 
@@ -56,6 +54,16 @@ struct Node
     return x == other.x && y == other.y;
   }
 };
+
+int getUnitActionIndex(vector<UnitAction> const &playerUnitActions, string const &id)
+{
+  for (int i = 0; i < playerUnitActions.size(); i++)
+  {
+    if (playerUnitActions[i].unitID.compare(id) == 0)
+      return i;
+  }
+  return -1;
+}
 
 vector<Position> pathFindToTarget(Position start, Position end, GameMap &map, vector<Position> &units, int ignoreUnitIdx, Player &player, bool ignoreCities)
 {
@@ -223,15 +231,18 @@ Position findClosestCity(Position position, Player &player)
   return Position(-1, -1);
 }
 
-Position findClosestResource(Position position, Player &player, vector<Cell *> &resourceTiles, std::string id, map<string, UnitAction> &unitActions)
+Position findClosestResource(Position position, Player &player, vector<Cell *> &resourceTiles, std::string id, vector<UnitAction> &unitActions)
 {
   vector<Position> resourcesTaken;
+  int tempIdx;
   for (Unit &unit : player.units)
   {
     if (std::strcmp(unit.id.c_str(), id.c_str()) == 0)
       continue;
-    if (unitActions[unit.id].state == HARVEST_RESOURCE)
-      resourcesTaken.push_back(unitActions[unit.id].targetPosition);
+
+    tempIdx = getUnitActionIndex(unitActions, unit.id);
+    if (unitActions[tempIdx].state == HARVEST_RESOURCE)
+      resourcesTaken.push_back(unitActions[tempIdx].targetPosition);
   }
 
   Cell *closestResourceTile;
@@ -239,6 +250,10 @@ Position findClosestResource(Position position, Player &player, vector<Cell *> &
   for (auto it = resourceTiles.begin(); it != resourceTiles.end(); it++)
   {
     auto cell = *it;
+
+    if (cell->resource.amount <= 10)
+      continue;
+
     if (cell->resource.type == ResourceType::coal && !player.researchedCoal())
       continue;
     if (cell->resource.type == ResourceType::uranium && !player.researchedUranium())
@@ -265,7 +280,7 @@ Position findClosestResource(Position position, Player &player, vector<Cell *> &
   return Position(-1, -1);
 }
 
-bool startHarvestResource(Unit &unit, UnitAction &unitAction, GameMap &gameMap, vector<Position> unitsPositionsTemp, int unitIdx, vector<string> &actions, Player &player, vector<Cell *> &resourceTiles, map<string, UnitAction> &unitActions)
+bool startHarvestResource(Unit &unit, UnitAction &unitAction, GameMap &gameMap, vector<Position> unitsPositionsTemp, int unitIdx, vector<string> &actions, Player &player, vector<Cell *> &resourceTiles, vector<UnitAction> &unitActions)
 {
   Position selectedPosition = findClosestResource(unit.pos, player, resourceTiles, unit.id, unitActions);
   if (selectedPosition.x != -1 && selectedPosition.y != -1)
@@ -284,7 +299,7 @@ bool startHarvestResource(Unit &unit, UnitAction &unitAction, GameMap &gameMap, 
   }
 }
 
-bool startBringBackResource(Unit &unit, UnitAction &unitAction, GameMap &gameMap, vector<Position> unitsPositionsTemp, int unitIdx, vector<string> &actions, Player &player, vector<Cell *> &resourceTiles, map<string, UnitAction> &unitActions)
+bool startBringBackResource(Unit &unit, UnitAction &unitAction, GameMap &gameMap, vector<Position> unitsPositionsTemp, int unitIdx, vector<string> &actions, Player &player, vector<Cell *> &resourceTiles, vector<UnitAction> &unitActions)
 {
   Position selectedPosition = findClosestCity(unit.pos, player);
   if (selectedPosition.x != -1 && selectedPosition.y != -1)
@@ -303,7 +318,7 @@ bool startBringBackResource(Unit &unit, UnitAction &unitAction, GameMap &gameMap
   }
 }
 
-bool startExpandingCity(Unit &unit, UnitAction &unitAction, GameMap &gameMap, vector<Position> unitsPositionsTemp, int unitIdx, vector<string> &actions, Player &player, vector<Cell *> &resourceTiles, map<string, UnitAction> &unitActions)
+bool startExpandingCity(Unit &unit, UnitAction &unitAction, GameMap &gameMap, vector<Position> unitsPositionsTemp, int unitIdx, vector<string> &actions, Player &player, vector<Cell *> &resourceTiles, vector<UnitAction> &unitActions)
 {
   Position selectedPosition = findClosestCityExpansion(unit.pos, player, gameMap);
   if (selectedPosition.x != -1 && selectedPosition.y != -1)
@@ -327,7 +342,7 @@ int main()
   kit::Agent gameState = kit::Agent();
   // initialize
   gameState.initialize();
-  vector<map<string, UnitAction>> allActions;
+  vector<vector<UnitAction>> allActions;
   vector<Position> unitsPositionTemp;
 
   while (true)
@@ -343,11 +358,11 @@ int main()
       Player &startup = gameState.players[0];
       for (int player = 0; player < 2; player++)
       {
-        allActions.push_back(map<string, UnitAction>());
+        allActions.push_back(vector<UnitAction>());
         startup = gameState.players[player];
         for (int i = 0; i < startup.units.size(); i++)
         {
-          allActions[player][startup.units[i].id] = UnitAction(startup.units[i].pos);
+          allActions[player].push_back(UnitAction(startup.units[i].id, startup.units[i].pos));
         }
       }
     }
@@ -361,7 +376,7 @@ int main()
 
     bool isDay = gameState.turn % 40 <= 25;
 
-    map<string, UnitAction> &playerUnitActions = allActions[gameState.id];
+    vector<UnitAction> &playerUnitActions = allActions[gameState.id];
 
     unitsPositionTemp.clear();
     for (int i = 0; i < player.units.size(); i++)
@@ -388,19 +403,41 @@ int main()
     for (int i = 0; i < player.units.size(); i++)
     {
       Unit unit = player.units[i];
+      int idx = getUnitActionIndex(playerUnitActions, unit.id);
 
-      if (playerUnitActions.find(unit.id) == playerUnitActions.end())
+      if (idx == -1)
       {
-        playerUnitActions[unit.id] = UnitAction(unit.pos);
+        playerUnitActions.push_back(UnitAction(unit.id, unit.pos));
+        idx = playerUnitActions.size() - 1;
       }
 
-      UnitAction &unitAction = playerUnitActions[unit.id];
+      UnitAction &unitAction = playerUnitActions[idx];
+
+      for (int pathIdx = 0; pathIdx < unitAction.pathToTarget.size(); pathIdx++)
+      {
+        if (unitAction.pathToTarget[pathIdx] == unit.pos)
+        {
+          unitAction.currentPathIdx = pathIdx;
+          break;
+        }
+      }
+
+      if (unitAction.pathToTarget.size() > 2)
+      {
+        for (int pathIdx = unitAction.currentPathIdx; pathIdx < unitAction.pathToTarget.size() - 1; pathIdx++)
+        {
+          std::cout << pathIdx << std::endl;
+          actions.push_back(Annotate::line(unitAction.pathToTarget[pathIdx].x, unitAction.pathToTarget[pathIdx].y,
+                                           unitAction.pathToTarget[pathIdx + 1].x, unitAction.pathToTarget[pathIdx + 1].y));
+        }
+      }
 
       if (unit.isWorker() && unit.canAct())
       {
         std::cout << "================" << std::endl;
         std::cout << "Unit " << i << std::endl;
         std::cout << unitAction.state << std::endl;
+        std::cout << unitAction.currentPathIdx << " for a path size of " << unitAction.pathToTarget.size() << std::endl;
 
         if (unitAction.state == HARVEST_RESOURCE)
         {
@@ -434,7 +471,7 @@ int main()
           {
             // Check if target resource still exists
             Cell *cell = gameMap.getCell(unitAction.targetPosition.x, unitAction.targetPosition.y);
-            if (!cell->hasResource())
+            if (!cell->hasResource() || cell->resource.amount < 10)
             {
               if (!startHarvestResource(unit, unitAction, gameMap, unitsPositionTemp, i, actions, player, resourceTiles, playerUnitActions))
               {
@@ -447,11 +484,15 @@ int main()
         {
           Cell *cell = gameMap.getCell(unitAction.targetPosition.x, unitAction.targetPosition.y);
           CityTile *citytile = cell->citytile;
-          if (citytile != nullptr && unit.getCargoSpaceLeft() > 0)
+          if (citytile == nullptr || unit.getCargoSpaceLeft() > 0)
           {
-            // Go Harvest
+            // Go Harvest / Do something else
 
-            if (!startBringBackResource(unit, unitAction, gameMap, unitsPositionTemp, i, actions, player, resourceTiles, playerUnitActions))
+            if (citytile == nullptr && !startBringBackResource(unit, unitAction, gameMap, unitsPositionTemp, i, actions, player, resourceTiles, playerUnitActions))
+            {
+              unitAction.state = DO_NOTHING;
+            }
+            else if (unit.getCargoSpaceLeft() > 0 && !startHarvestResource(unit, unitAction, gameMap, unitsPositionTemp, i, actions, player, resourceTiles, playerUnitActions))
             {
               unitAction.state = DO_NOTHING;
             }
